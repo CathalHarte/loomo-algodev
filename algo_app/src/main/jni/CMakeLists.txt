@@ -5,11 +5,11 @@ project(Algo)
 #config APP module
 #####################################
 # MACROS for selecting modules
-# set(APP_MODULE "TEST")
+set(APP_MODULE "TEST")
 # set(APP_MODULE "LOCALMAPPING_TEST")
 # set(APP_MODULE "TENSORFLOW_SAMPLE")
 # set(APP_MODULE "SOCKET")
-set(APP_MODULE "FOLLOW")
+# set(APP_MODULE "FOLLOW")
 
 #####################################
 # Set the compile related flags....
