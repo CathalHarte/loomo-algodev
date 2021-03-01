@@ -13,3 +13,4 @@ gradle/
 segway_robotics_algodev.iml
 loomo-algodev.iml
 dependency/3rdparty_android/
+.cxx
