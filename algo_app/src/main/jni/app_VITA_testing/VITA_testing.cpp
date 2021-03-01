@@ -1,9 +1,9 @@
-#include "AlgoFollow.h"
+#include "VITA_testing.h"
 #include "ninebot_log.h"
 #include "AlgoUtils.h"
 #include "Quaternion.h"
 #include "Vector3.h"
-
+#include <cmath>
 #include <algorithm>
 #include "SocketServer.h"
 
@@ -11,16 +11,16 @@
 
 namespace ninebot_algo
 {
-    namespace follow_algo
-    {
-        using namespace std;
-        using namespace cv;
+	namespace testing_algo
+	{
+		using namespace std;
+		using namespace cv;
 
-        AlgoFollow::AlgoFollow(RawData *rawInterface, int run_sleep_ms, bool isRender)
+        AlgoTesting::AlgoTesting(RawData *rawInterface, int run_sleep_ms, bool isRender)
                 :AlgoBase(rawInterface,run_sleep_ms,true)
         {
             mRawDataInterface->ExecuteHeadMode(0);
-            mRawDataInterface->ExecuteHeadPos(0, 0.7, 0);
+            mRawDataInterface->ExecuteHeadPos(-1.5, 0.0, 0);
             m_is_init_succed = false;
             m_ptime = 10;
             m_isRender = isRender;
@@ -30,16 +30,16 @@ namespace ninebot_algo
             m_is_track_head = false;
             m_is_track_vehicle = false;
             m_p_local_mapping = NULL;
-            m_target_distance = -1.0f;
+            m_target_distance = 0.0f;
             m_target_theta = 0.0f;
             init();
         }
 
-        AlgoFollow::~AlgoFollow() {
+		AlgoTesting::~AlgoTesting() {
             this->stopPoseRecord();
 
             mRawDataInterface->ExecuteHeadMode(0);
-            mRawDataInterface->ExecuteHeadPos(0, 0.7, 0);
+            mRawDataInterface->ExecuteHeadPos(-1.5, 0.0, 0);
 
             if(m_p_local_mapping) {
                 delete m_p_local_mapping;
@@ -51,9 +51,34 @@ namespace ninebot_algo
                 m_p_localmapping_rawdata = NULL;
             }
 
-            if(m_p_server != NULL) {
-                delete m_p_server;
-                m_p_server = NULL;
+            if(m_p_server_control != NULL) {
+                delete m_p_server_control;
+                m_p_server_control = NULL;
+            }
+
+            if(m_p_server_perception != NULL) {
+                delete m_p_server_perception;
+                m_p_server_perception = NULL;
+            }
+
+            if(m_p_server_estimation != NULL) {
+                delete m_p_server_estimation;
+                m_p_server_estimation = NULL;
+            }
+
+            if(m_p_server_mapping != NULL) {
+                delete m_p_server_mapping;
+                m_p_server_mapping = NULL;
+            }
+
+            if(m_p_server_prediction != NULL) {
+                delete m_p_server_prediction;
+                m_p_server_prediction = NULL;
+            }
+
+            if(m_p_server_perception_2 != NULL) {
+                delete m_p_server_perception_2;
+                m_p_server_perception_2 = NULL;
             }
 
             if(m_p_head_yaw_tracker != NULL) {
@@ -77,14 +102,13 @@ namespace ninebot_algo
             }
 
             delete[] bounding_box;
+            delete[] control_cmd;
         }
 
-        bool AlgoFollow::init()
+		bool AlgoTesting::init() 
         {
-            mRawDataInterface->ExecuteHeadMode(0);
-            mRawDataInterface->ExecuteHeadPos(0, 0.7, 0);
 
-            raw_depth.image = cv::Mat::zeros(cv::Size(320, 240), CV_16UC1);
+			raw_depth.image = cv::Mat::zeros(cv::Size(320, 240), CV_16UC1);
             raw_depth.timestampSys = 0;
             t_old = 0;
             imgstream_en = true;
@@ -98,7 +122,13 @@ namespace ninebot_algo
             ALOGD("robot model: %d", RawData::retrieveRobotModel());
             m_is_init_succed = true;
 
-            m_p_server = new SocketServer;
+            m_p_server_control = new SocketServer(8080);
+            m_p_server_perception = new SocketServer(8081);
+            m_p_server_estimation = new SocketServer(8082);
+            m_p_server_mapping = new SocketServer(8083);
+            m_p_server_prediction = new SocketServer(8084);
+            m_p_server_perception_2 = new SocketServer(8085);
+
             m_timestamp_start = mRawDataInterface->getCurrentTimestampSys();
 
             initLocalMapping();
@@ -119,26 +149,27 @@ namespace ninebot_algo
             // detection
             m_is_detected = false;
             bounding_box = new float[5];
+            control_cmd = new float[2];
 
             return m_is_init_succed;
-        }
+		}
 
-        void AlgoFollow::UpdateAccel(MTPoint val)
-        {
-            raw_accel = val;
-        }
+		void AlgoTesting::UpdateAccel(MTPoint val)
+		{
+			raw_accel = val;
+		}
 
-        void AlgoFollow::UpdateGyro(MTPoint val)
-        {
-            raw_gyro = val;
-        }
+		void AlgoTesting::UpdateGyro(MTPoint val)
+		{
+			raw_gyro = val;
+		}
 
-        void AlgoFollow::toggleImgStream()
-        {
-            imgstream_en = !imgstream_en;
-        }
+		void AlgoTesting::toggleImgStream()
+		{
+			imgstream_en = !imgstream_en;
+		}
 
-        void AlgoFollow::setVLSopen(bool en)
+		void AlgoTesting::setVLSopen(bool en)
         {
             if(en)
                 mRawDataInterface->startVLS(false);
@@ -146,30 +177,30 @@ namespace ninebot_algo
                 mRawDataInterface->stopVLS();
         }
 
-        void AlgoFollow::startPoseRecord(std::string save_folder, int64_t save_time)
+        void AlgoTesting::startPoseRecord(std::string save_folder, int64_t save_time)
         {
             pose_isRecording = true;
             nStep = 0;
             m_folder_socket = "/sdcard/socket/";
-            createFolder(m_folder_socket);
-            m_state_file.open(m_folder_socket + "state.txt");
+            createFolder(m_folder_socket);        
+            m_state_file.open(m_folder_socket + "state.txt");    
         }
 
-        void AlgoFollow::stopPoseRecord()
+        void AlgoTesting::stopPoseRecord()
         {
             pose_isRecording = false;
             m_state_file.close();
         }
 
-        bool AlgoFollow::step()
-        {
-            /*! Get start timestamp for calculating algorithm runtime */
-            auto start = std::chrono::high_resolution_clock::now();
+		bool AlgoTesting::step()
+		{
+			/*! Get start timestamp for calculating algorithm runtime */
+			auto start = std::chrono::high_resolution_clock::now();
 
-            if(!m_is_init_succed){
-                ALOGD("AlgoFollow: init false");
-                return false;
-            }
+			if(!m_is_init_succed){
+				ALOGD("AlgoTesting: init false");
+				return false;
+			}
 
             if(imgstream_en){
                 mRawDataInterface->retrieveDepth(raw_depth, false);
@@ -178,38 +209,40 @@ namespace ninebot_algo
                     ALOGD("depth wrong");
                     return false;
                 }
+                
                 // check if depth is duplicate
                 if(t_old==raw_depth.timestampSys)
                 {
                     ALOGD("depth duplicate: %lld",raw_depth.timestampSys/1000);
                     return true;
                 }
+
                 else
                 {
                     t_old=raw_depth.timestampSys;
                     ALOGD("depth correct");
-                }
+                } 
             }
 
             /*! **********************************************************************
-             * **** Local
-             * ********************************************************************* */
+             * **** Local 
+             * ********************************************************************* */         
             mRawDataInterface->retrieveOdometry(raw_odometry, -1);
             prepare_localmap_and_pose_for_controller_g1();
 
             /*! **********************************************************************
              * **** Cloud
-             * ********************************************************************* */
+             * ********************************************************************* */         
             this->stepServer();
 
             /*! **********************************************************************
-             * **** Processing the algorithm with all input and sensor data **********
-             * ********************************************************************* */
+            * **** Processing the algorithm with all input and sensor data **********
+            * ********************************************************************* */
             string contents;
 
             if(m_isRender)
             {
-                /*! Copy internal canvas to intermediate buffer mDisplayIm */
+            /*! Copy internal canvas to intermediate buffer mDisplayIm */
                 renderDisplay();
                 setDisplayData();
             }
@@ -217,124 +250,204 @@ namespace ninebot_algo
             /*! Calculate the algorithm runtime */
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> elapsed = end-start;
-            ALOGD("step time: %f",elapsed.count());
+            printf("step time: %f",elapsed.count());
             {
                 std::lock_guard<std::mutex> lock(mMutexTimer);
                 m_ptime = elapsed.count()*0.5 + m_ptime*0.5;
             }
 
-            return true;
-        }
+			return true;
+		}
 
-        void AlgoFollow::stepServer() {
-
+        void AlgoTesting::stepServer() 
+        {
             // generate mapping
             // mRawDataInterface->retrieveDS4Color(raw_colords4, true);
             mRawDataInterface->retrieveColor(raw_color, true);
 
-            ALOGD("raw_color: (%lld,%d,%d,%d)", raw_color.timestampSys, raw_color.image.cols, raw_color.image.rows, raw_color.image.channels());
+            ALOGD("raw_color: (%lld,%d,%d,%d)", raw_color.timestampSys, raw_color.image.cols, raw_color.image.rows, raw_color.image.channels()); 
 
-            if (raw_color.image.empty()) {
+            if (raw_color.image.empty()) 
+            {
                 ALOGW("empty raw_color image");
                 mRawDataInterface->ExecuteCmd(0.0f, 0.0f, mRawDataInterface->getCurrentTimestampSys());
                 return;
             }
 
-            if (m_p_server->isStopped()) {
+            if (m_p_server_control->isStopped())
+            {
                 mRawDataInterface->ExecuteCmd(0.0f, 0.0f, mRawDataInterface->getCurrentTimestampSys());
                 ALOGW("server stopped");
                 return;
             }
 
-            if (!m_p_server->isConnected()) {
+            if (!m_p_server_control->isConnected()) {
                 mRawDataInterface->ExecuteCmd(0.0f, 0.0f, mRawDataInterface->getCurrentTimestampSys());
                 ALOGW("server disconnected");
                 mRawDataInterface->ExecuteHeadMode(0);
-                mRawDataInterface->ExecuteHeadPos(0, 0.7, 0);
+                mRawDataInterface->ExecuteHeadPos(-1.5, 0.0, 0);
                 return;
             }
 
-            cv::Mat image_send;
-            cv::resize(raw_color.image, image_send, cv::Size(640/m_down_scale, 480/m_down_scale));
-            int info_send_image = m_p_server->sendImage(image_send, 640/m_down_scale, 480/m_down_scale);
-            if (info_send_image < 0) {
-                ALOGW("server send iamge failed");
-                mRawDataInterface->ExecuteHeadMode(0);
-                mRawDataInterface->ExecuteHeadPos(0, 0.7, 0);
-                return;
-            }
-            else {
-                ALOGW("server send iamge succeeded");
-            }
+            this->send_image();
 
-            // Receive Bounding Box coordinates (5 floats)
-            float* floats_recv = new float[5];
-            int rcv_info_test = m_p_server->recvFloats(floats_recv, 5);
-            if (rcv_info_test < 0) {
-                ALOGD("server rcv float failed");
-                return;
-            }
-            else {
-                for (int i = 0; i < 5; i++)
-                {
-                    bounding_box[i] = *(float*)&floats_recv[i];
-                    ALOGD("server bounding_box #%d: %.2f", i, bounding_box[i]);
-                }
-            }
-            delete[] floats_recv;
+            this->send_state();
 
-            m_roi_color.width = int(bounding_box[2] * m_down_scale);
-            m_roi_color.height = int(bounding_box[3] * m_down_scale);
-            m_roi_color.x = (bounding_box[0] - 320/m_down_scale) * m_down_scale + 320;
-            m_roi_color.y = (bounding_box[1] - 240/m_down_scale) * m_down_scale + 240;
-            // convert from center to top-left corner
-            m_roi_color.x = int(m_roi_color.x - m_roi_color.width/2);
-            m_roi_color.y = int(m_roi_color.y - m_roi_color.height/2);
+            this->receive_bounding_boxes_send_position();
 
-            if (bounding_box[4] > 0.5)
-                m_is_detected = true;
-            else
-                m_is_detected = false;
-
-            float target_theta_wrt_head =0.0f;
-            if (m_is_detected) {
-                ExtractTarget(m_target_distance, target_theta_wrt_head);
-                m_target_theta = target_theta_wrt_head + raw_headpos.yaw;
-            }
-            else {
-                m_target_distance = -1.0f;
-                m_target_theta = 0.0f;
-                target_theta_wrt_head = 0.0f;
-            }
-
-            this->trackHead(m_target_theta);
-            this->trackVehicle(m_target_distance, m_target_theta);
-            ALOGD("Vehicle Target: target_distance = %f, target_theta_wrt_head = %f", m_target_distance, target_theta_wrt_head);
+            this->receive_control_cmd();
 
             return;
         }
 
-        void AlgoFollow::switchHeadTracker() {
+
+        void AlgoTesting::send_image()
+        {
+            // Send image to perception
+            cv::Mat image_send;
+            cv::resize(raw_color.image, image_send, cv::Size(640/m_down_scale, 480/m_down_scale));
+            int info_send_image = m_p_server_perception->sendImage(image_send, 640/m_down_scale, 480/m_down_scale);
+        }
+
+
+        void AlgoTesting::send_state()
+        {
+            // Send the state of the Loomo {x,y,heading,vx,w,ax,ay}
+            float* states = new float[5];
+            mRawDataInterface->retrieveOdometry(raw_odometry, -1);
+            states[0] = float(raw_odometry.twist.pose.x);
+            states[1] = float(raw_odometry.twist.pose.y);
+            states[2] = float(raw_odometry.twist.pose.orientation);
+            states[3] = raw_odometry.twist.velocity.linear_velocity;
+            states[4] = raw_odometry.twist.velocity.angular_velocity;
+
+            int info_send_state = m_p_server_estimation->sendFloats(states, 5);
+
+            delete[] states;
+        }
+
+        void AlgoTesting::receive_bounding_boxes_send_position()
+        {
+            // Receive Bounding Box coordinates from perception (5 floats)
+            float* floats_recv = new float[25];
+            int rcv_info_test = m_p_server_perception_2->recvFloats(floats_recv, 25);
+            float* position_obj = new float[10];
+
+            if (rcv_info_test < 0) 
+            {
+                ALOGD("server rcv float failed");
+                return;
+            }
+
+            else
+            {
+                m_is_detected = false;
+
+                for (int i = 0; i < 5; i++)
+                {
+                    bounding_box[0] = *(float*)&floats_recv[5*i];
+                    bounding_box[1] = *(float*)&floats_recv[(5*i+1)];
+                    bounding_box[2] = *(float*)&floats_recv[(5*i+2)];
+                    bounding_box[3] = *(float*)&floats_recv[(5*i+3)];
+                    bounding_box[4] = *(float*)&floats_recv[(5*i+4)];
+
+                    ALOGD("server bounding_box #%d: %.2f", i, bounding_box);
+
+                    float target_theta_wrt_head =0.0f;
+
+                    if (bounding_box[4] > 0.5)
+                    {
+                        m_is_detected = true;
+                        m_roi_color.width = int(bounding_box[2] * m_down_scale);
+                        m_roi_color.height = int(bounding_box[3] * m_down_scale);
+                        m_roi_color.x = int(bounding_box[0] * m_down_scale);
+                        m_roi_color.y = int(bounding_box[1] * m_down_scale);
+
+                        // convert from center to top-left corner
+                        m_roi_color_act.width = m_roi_color.width;
+                        m_roi_color_act.height = m_roi_color.height;
+                        m_roi_color_act.x = m_roi_color.x - m_roi_color.width/2;
+                        m_roi_color_act.y = m_roi_color.y - m_roi_color.height/2;
+
+
+                        ExtractTarget(m_target_distance, target_theta_wrt_head);
+                        m_target_theta = target_theta_wrt_head + raw_headpos.yaw;
+                        m_target_distance_act = m_target_distance;
+                        m_target_theta_act = m_target_theta;
+                    }
+                    
+                    else
+                    {
+                        m_target_distance = 0.0f;
+                        m_target_theta = 0.0f;
+                        target_theta_wrt_head = 0.0f;
+                    }
+
+                    position_obj[(2*i)+0] = m_target_distance * cos(m_target_theta);
+                    position_obj[(2*i)+1] = m_target_distance * sin(m_target_theta);
+                    
+                }
+
+            int info_send_perception = m_p_server_prediction->sendFloats(position_obj, 10);
+            int info_send_mapping = m_p_server_mapping->sendFloats(position_obj, 10);
+
+            this->trackHead(m_target_theta_act);
+
+            delete[] floats_recv;
+
+            delete[] position_obj;
+            return;
+            }
+        }
+
+        void AlgoTesting::receive_control_cmd()
+        {
+            // Receive Control commands (2 floats)
+            float* floats_recv_control = new float[2];
+            int rcv_info_test_control = m_p_server_control->recvFloats(floats_recv_control, 2);
+            control_cmd[0] = 0.0;
+            control_cmd[1] = 0.0;
+
+            if (rcv_info_test_control < 0) 
+            {
+                ALOGD("server rcv float failed");
+                this->trackVehicle(0.0, 0.0);
+                return;
+            }
+
+            else 
+            {
+                control_cmd[0] = *(float*)&floats_recv_control[0];
+                control_cmd[1] = *(float*)&floats_recv_control[1];
+                if (control_cmd[1]<2.0 && control_cmd[1] > -2.0) {
+                    this->trackVehicle(control_cmd[0], control_cmd[1]);
+                }
+                delete[] floats_recv_control;
+                return;
+            }
+        }
+
+        void AlgoTesting::switchHeadTracker() {
             m_is_track_head = !m_is_track_head;
         }
 
-        void AlgoFollow::switchVehicleTracker() {
+        void AlgoTesting::switchVehicleTracker() {
             m_is_track_vehicle = !m_is_track_vehicle;
             m_is_track_head = m_is_track_vehicle;
         }
 
-        void AlgoFollow::safeControl(float v, float w) {
+        void AlgoTesting::safeControl(float v, float w) {
             if (m_safety_control) {
-                const float kCloseObstacleThres = 1.0;
+                const float kCloseObstacleThres = 0.1;
                 if(m_ultrasonic_average < kCloseObstacleThres*1000){
-                    if (v > 0 && std::abs(v/std::fmax(0.01,w)) > 0.8){
-                        StampedVelocity velocity;
-                        mRawDataInterface->retrieveBaseVelocity(velocity);
-                        float v_emergency = std::min(0.0, 0.2-velocity.vel.linear_velocity);
-                        ALOGE("command dangerous: (%f,%f), current vel: (%f,%f), ultrasonic_average = %f: v_emergency = %f", v, w, velocity.vel.linear_velocity, velocity.vel.angular_velocity, m_ultrasonic_average, v_emergency);
-                        mRawDataInterface->ExecuteCmd(v_emergency, 0.0f, 0);
-                        return;
-                    }
+                    //if (v > 0 && std::abs(v/std::fmax(0.01,w)) > 0.8){
+                    StampedVelocity velocity;
+                    mRawDataInterface->retrieveBaseVelocity(velocity);
+                    float v_emergency = std::min(0.0, 0.2-velocity.vel.linear_velocity);
+                    ALOGE("command dangerous: (%f,%f), current vel: (%f,%f), ultrasonic_average = %f: v_emergency = %f", v, w, velocity.vel.linear_velocity, velocity.vel.angular_velocity, m_ultrasonic_average, v_emergency);
+                    mRawDataInterface->ExecuteCmd(v_emergency, 0.0f, 0);
+                    return;
+                    //}
                 }
             }
 
@@ -342,49 +455,49 @@ namespace ninebot_algo
             ALOGD("command safe: (%f,%f)", v, w);
         }
 
-        float AlgoFollow::runTime()
-        {
-            std::lock_guard<std::mutex> lock(mMutexTimer);
-            return m_ptime;
-        }
+		float AlgoTesting::runTime()
+		{
+			std::lock_guard<std::mutex> lock(mMutexTimer);
+			return m_ptime;
+		}
 
-        bool AlgoFollow::showScreen(void* pixels) // canvas 640x360, RGBA format
-        {
-            {
-                std::lock_guard<std::mutex> lock(mMutexDisplay);
-                if(mDisplayIm.empty())
-                    return false;
-                cv::cvtColor(mDisplayIm, mDisplayData, CV_BGR2RGBA);
-            }
-            memcpy(pixels, (void *)mDisplayData.data, mDisplayData.cols * mDisplayData.rows * 4);
-            return true;
-        }
+		bool AlgoTesting::showScreen(void* pixels) // canvas 640x360, RGBA format
+		{
+			{
+				std::lock_guard<std::mutex> lock(mMutexDisplay);
+				if(mDisplayIm.empty())
+					return false;
+				cv::cvtColor(mDisplayIm, mDisplayData, CV_BGR2RGBA);
+			}
+			memcpy(pixels, (void *)mDisplayData.data, mDisplayData.cols * mDisplayData.rows * 4);
+			return true;
+		}
 
-        void AlgoFollow::setDisplayData()
-        {
-            std::lock_guard<std::mutex> lock(mMutexDisplay);
-            mDisplayIm = canvas.clone();
-        }
+		void AlgoTesting::setDisplayData()
+		{
+			std::lock_guard<std::mutex> lock(mMutexDisplay);
+			mDisplayIm = canvas.clone();
+		}
 
-        void AlgoFollow::createFolder(std::string new_folder_name)
+        void AlgoTesting::createFolder(std::string new_folder_name)
         {
             std::string cmd_str_rm = "rm -rf \"" + new_folder_name + "\"";
             system(cmd_str_rm.c_str());
-            ALOGD("Command %s was executed. ", cmd_str_rm.c_str());
+            ALOGD("Command %s was executed. ", cmd_str_rm.c_str());          
             std::string cmd_str_mk = "mkdir \"" + new_folder_name + "\"";
             system(cmd_str_mk.c_str());
             ALOGD("Command %s was executed. ", cmd_str_mk.c_str());
         }
 
-        std::string AlgoFollow::getDebugString()
+        std::string AlgoTesting::getDebugString()
         {
             std::string str;
 
             if (m_safety_control){
-                str = "，safety ON";
+                str = "，safety ON"; 
             }
             else {
-                str = "，safety OFF";
+                str = "，safety OFF"; 
             }
 
             int raw_errorcode = mRawDataInterface->retrieveDeviceErrorCode();
@@ -394,7 +507,7 @@ namespace ninebot_algo
             return str;
         }
 
-        bool AlgoFollow::initLocalMapping()
+        bool AlgoTesting::initLocalMapping()
         {
             if(m_p_local_mapping) {
                 delete m_p_local_mapping;
@@ -423,7 +536,7 @@ namespace ninebot_algo
             return true;
         }
 
-        bool AlgoFollow::prepare_localmap_and_pose_for_controller_g1() {
+        bool AlgoTesting::prepare_localmap_and_pose_for_controller_g1() {
             // generate mapping
             mRawDataInterface->retrieveDepth(raw_depth, true);
 
@@ -444,7 +557,7 @@ namespace ninebot_algo
                 return false;
             }
 
-            // clear history
+            // clear history 
             m_p_local_mapping->clearMap();
             // m_p_local_mapping->setMapValue(raw_odometry.twist.pose.x, raw_odometry.twist.pose.y, 254, 1.5);
 
@@ -470,14 +583,14 @@ namespace ninebot_algo
             for (auto ultrasonic_element : m_ultrasonic_buffer) {
                 ultrasonic_sum += ultrasonic_element;
             }
-            m_ultrasonic_average = ultrasonic_sum / m_ultrasonic_buffer.size();
+            m_ultrasonic_average = ultrasonic_sum / m_ultrasonic_buffer.size(); 
 
             m_p_local_mapping->getDepthMapWithFrontUltrasonic(m_local_map, false, tfmsgTo2DPose(resList[0]), m_ultrasonic_average);
 
             return true;
         }
 
-        void AlgoFollow::trackHead(const float target_theta_head) {
+        void AlgoTesting::trackHead(const float target_theta_head) {
             float w = 0.0f;
             float head_pitch_speed = 0.0f;
             float head_yaw_speed = 0.0f;
@@ -493,7 +606,7 @@ namespace ninebot_algo
 
             // yaw
             if (m_p_head_pitch_tracker)
-                head_pitch_speed = m_p_head_pitch_tracker->calculate(0.5f, raw_headpos.pitch);
+                head_pitch_speed = m_p_head_pitch_tracker->calculate(0.0f, raw_headpos.pitch);
 
             // // pitch
             // const int HEIGHT_COLOR_IMG = 480;
@@ -525,43 +638,20 @@ namespace ninebot_algo
             ALOGD("trackHead: target_theta_head = %f, yaw_speed = %f, pitch_speed = %f", target_theta_head, head_yaw_speed, head_pitch_speed);
         }
 
-        void AlgoFollow::trackVehicle(const float target_distance, const float target_theta) {
-            float vehicle_linear_velocity, vehicle_angular_velocity;
+        void AlgoTesting::trackVehicle(const float vehicle_linear_velocity, const float vehicle_angular_velocity) {
             if (m_is_track_vehicle) {
-                if (m_is_detected && target_distance > 0) {
-                    if (target_distance > 1.5) {
-                        vehicle_linear_velocity = m_p_vehicle_tracker->calculate(target_distance - 1.2f, 0.0);
-                        vehicle_angular_velocity = vehicle_linear_velocity / fmin(2.0f,target_distance) * target_theta * 2.0f;
-                    }
-                    else {
-                        vehicle_linear_velocity = m_p_vehicle_tracker->calculate(0.0, 0.0);
-                        vehicle_linear_velocity = 0.0f;
-                        if (abs(target_theta) > 0.2) {
-                            vehicle_angular_velocity = target_theta * 1.0f;
-                        }
-                        else {
-                            vehicle_angular_velocity = 0.0f;
-                        }
-                    }
-                }
-                else {
-                    vehicle_linear_velocity = m_p_vehicle_tracker->calculate(0.0, 0.0);
-                    vehicle_linear_velocity = 0.0f;
-                    vehicle_angular_velocity = 0.0f;
-                }
                 this->safeControl(vehicle_linear_velocity, vehicle_angular_velocity);
             }
-            ALOGD("trackVehicle: target_distance = %.2f, target_theta = %.2f, vehicle_linear_velocity = %.2f, vehicle_angular_velocity=%.2f", target_distance, target_theta, vehicle_linear_velocity, vehicle_angular_velocity);
         }
 
-        void AlgoFollow::ExtractTarget(float & target_distance, float & target_theta_wrt_head){
-
+        void AlgoTesting::ExtractTarget(float & target_distance, float & target_theta_wrt_head){
+            
             mRawDataInterface->retrieveHeadPos(raw_headpos);
             m_p_depth_processor->setPitch(raw_headpos.pitch);
             ALOGD("ExtractTarget: setPitch = %f", raw_headpos.pitch);
 
             cv::Mat hist_image;
-            bool is_dist_valid = m_p_depth_processor->process(raw_depth, m_roi_color, m_roi_depth, hist_image, target_distance, target_theta_wrt_head);
+            bool is_dist_valid = m_p_depth_processor->process(raw_depth, m_roi_color_act, m_roi_depth, hist_image, target_distance, target_theta_wrt_head);
             // target_theta_wrt_head = -target_theta_wrt_head;
 
             ALOGD("ExtractTarget: is_dist_valid = %d", is_dist_valid);
@@ -571,14 +661,14 @@ namespace ninebot_algo
             // target_theta_wrt_head = (float) m_roi_color.x / 640.f - 0.5f;
         }
 
-        void AlgoFollow::renderDisplay() {
+        void AlgoTesting::renderDisplay() {
             /*! Draw the result to canvas */
             canvas.setTo(240);
             if(imgstream_en){
                 if(!raw_color.image.empty()){
                     cv::Mat show_color;
                     const float resize_show_color = 0.5;
-                    cv::resize(raw_color.image, show_color, cv::Size(), resize_show_color, resize_show_color);
+                    cv::resize(raw_color.image, show_color, cv::Size(), resize_show_color, resize_show_color); 
                     if (m_is_detected)
                         cv::rectangle(show_color, cv::Rect(int(m_roi_color.x * resize_show_color), int(m_roi_color.y * resize_show_color), int(m_roi_color.width * resize_show_color), int(m_roi_color.height * resize_show_color)), Scalar(0, 0, 0), 10);
                     cv::Mat flip_color;               // dst must be a different Mat
@@ -589,7 +679,7 @@ namespace ninebot_algo
                 if(!raw_depth.image.empty()){
                     cv::Mat show_depth, rescale_depth;
                     const float resize_show_depth = 1.0;
-                    cv::resize(raw_depth.image, rescale_depth, cv::Size(), resize_show_depth, resize_show_depth);
+                    cv::resize(raw_depth.image, rescale_depth, cv::Size(), resize_show_depth, resize_show_depth); 
                     rescale_depth /= 10;
                     rescale_depth.convertTo(show_depth, CV_8U);
                     applyColorMap(show_depth, show_depth, cv::COLORMAP_JET);
@@ -600,40 +690,45 @@ namespace ninebot_algo
                     cv::flip(show_depth, flip_depth, 1);        // because you can't flip in-place (leads to segfault)
                     cv::Mat ca2 = canvas(cv::Rect(320, 0, flip_depth.cols, flip_depth.rows));
                     flip_depth.copyTo(ca2);
-                }
+                } 
 
                 string contents;
                 if (m_is_track_head){
-                    contents = "Head: On";
+                    contents = "Head: On"; 
                 }
                 else {
-                    contents = "Head: Off";
+                    contents = "Head: Off"; 
                 }
                 putText(canvas, contents, cv::Point(0, 300), CV_FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0,0,0), 2);
 
                 if (m_is_track_vehicle){
-                    contents = "Wheel: On";
+                    contents = "Wheel: On"; 
                 }
                 else {
-                    contents = "Wheel: Off";
+                    contents = "Wheel: Off"; 
                 }
                 putText(canvas, contents, cv::Point(0, 330), CV_FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0,0,0), 2);
 
-                if (m_target_distance > 0) {
-                    contents = "D: " + ToString(m_target_distance);
-                    putText(canvas, contents, cv::Point(200, 300), CV_FONT_HERSHEY_COMPLEX, 1.5, cv::Scalar(0,0,0), 2);
-                    contents = "A: " + ToString(m_target_theta/3.14*180.0);
-                    putText(canvas, contents, cv::Point(400, 300), CV_FONT_HERSHEY_COMPLEX, 1.5, cv::Scalar(0,0,0), 2);
+                //contents = "Control: v = " + ToString(control_cmd[0]);
+                //putText(canvas, contents, cv::Point(200, 300), CV_FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0,0,0), 2);
+                //contents = "Control: w = " + ToString(control_cmd[1]);
+                //putText(canvas, contents, cv::Point(200, 330), CV_FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0,0,0), 2);
+
+                if (m_target_distance_act > 0) {
+                    contents = "D: " + ToString(m_target_distance_act);
+                    putText(canvas, contents, cv::Point(200, 300), CV_FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0,0,0), 2);
+                    contents = "A: " + ToString(m_target_theta_act/3.14*180.0);
+                    putText(canvas, contents, cv::Point(400, 300), CV_FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0,0,0), 2);
                 }
 
             }
         }
 
-        bool AlgoFollow::loadConfig(float & head_kp, float & head_ki, float & head_kd, float & vehicle_kp, float & vehicle_ki, float & vehicle_kd)
+        bool AlgoTesting::loadConfig(float & head_kp, float & head_ki, float & head_kd, float & vehicle_kp, float & vehicle_ki, float & vehicle_kd)
         {
-            head_kp = 1.5f;
-            head_ki = 0.10f;
-            head_kd = 0.01f;
+            head_kp = 0.0f;
+            head_ki = 0.00f;
+            head_kd = 0.00f;
             vehicle_kp = 0.50f;
             vehicle_ki = 0.01f;
             vehicle_kd = 0.01f;
@@ -667,34 +762,34 @@ namespace ninebot_algo
 
                     switch (param_setting)
                     {
-                        case HEAD_KP:
-                            ALOGD("config loaded, HEAD_KP = %f", param_value);
-                            head_kp = param_value;
-                            break;
-                        case HEAD_KI:
-                            ALOGD("config loaded, HEAD_KI = %f", param_value);
-                            head_ki = param_value;
-                            break;
-                        case HEAD_KD:
-                            ALOGD("config loaded, HEAD_KD = %f", param_value);
-                            head_kd = param_value;
-                            break;
-                        case VEHICLE_KP:
-                            ALOGD("config loaded, VEHICLE_KD = %f", param_value);
-                            vehicle_kp = param_value;
-                            break;
-                        case VEHICLE_KI:
-                            ALOGD("config loaded, VEHICLE_KD = %f", param_value);
-                            vehicle_ki = param_value;
-                            break;
-                        case VEHICLE_KD:
-                            ALOGD("config loaded, VEHICLE_KD = %f", param_value);
-                            vehicle_kd = param_value;
-                            break;
-                        case IMG_DOWNSCALE:
-                            ALOGD("config loaded, m_down_scale = %f", param_value);
-                            m_down_scale = int(param_value);
-                            break;
+                    case HEAD_KP:
+                        ALOGD("config loaded, HEAD_KP = %f", param_value);
+                        head_kp = param_value;
+                        break;
+                    case HEAD_KI:
+                        ALOGD("config loaded, HEAD_KI = %f", param_value);
+                        head_ki = param_value;
+                        break;
+                    case HEAD_KD:
+                        ALOGD("config loaded, HEAD_KD = %f", param_value);
+                        head_kd = param_value;
+                        break;
+                    case VEHICLE_KP:
+                        ALOGD("config loaded, VEHICLE_KD = %f", param_value);
+                        vehicle_kp = param_value;
+                        break;
+                    case VEHICLE_KI:
+                        ALOGD("config loaded, VEHICLE_KD = %f", param_value);
+                        vehicle_ki = param_value;
+                        break;
+                    case VEHICLE_KD:
+                        ALOGD("config loaded, VEHICLE_KD = %f", param_value);
+                        vehicle_kd = param_value;
+                        break;       
+                    case IMG_DOWNSCALE:
+                        ALOGD("config loaded, m_down_scale = %f", param_value);
+                        m_down_scale = int(param_value);
+                        break;
                     }
                 }
                 idx_config++;
@@ -706,5 +801,6 @@ namespace ninebot_algo
             return true;
         }
 
-    } // namespace follow_algo
+	} // namespace follow_algo
 } // namespace ninebot_algo
+

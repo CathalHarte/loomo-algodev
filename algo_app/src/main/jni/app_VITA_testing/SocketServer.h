@@ -9,13 +9,13 @@
 namespace ninebot_algo
 {
 	/*! namespace of this algorithm  */
-	namespace follow_algo
+	namespace testing_algo
 	{
 
 		class SocketServer {
 		public :
-			SocketServer(int port = 8081);
-			SocketServer(bool is_send_timeout, bool is_recv_timeout, int port = 8081);
+			SocketServer(int port);
+			SocketServer(bool is_send_timeout, bool is_recv_timeout, int port);
 			virtual ~SocketServer();
 
 			int recvChars(char* recv_chars, const int length);
@@ -63,4 +63,4 @@ namespace ninebot_algo
 	}
 }
 
-#endif
+#endif  

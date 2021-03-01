@@ -5,11 +5,12 @@ project(Algo)
 #config APP module
 #####################################
 # MACROS for selecting modules
-set(APP_MODULE "TEST")
+# set(APP_MODULE "TEST")
 # set(APP_MODULE "LOCALMAPPING_TEST")
 # set(APP_MODULE "TENSORFLOW_SAMPLE")
 # set(APP_MODULE "SOCKET")
 # set(APP_MODULE "FOLLOW")
+set(APP_MODULE "VITA_TESTING")
 
 #####################################
 # Set the compile related flags....
@@ -101,6 +102,11 @@ if(USING_FOLLOW_MODULE)
     set(USE_LOCALMAPPING ON)
 #    set(USE_LIBREALSENSE ON)
 endif(USING_FOLLOW_MODULE)
+
+string(COMPARE EQUAL ${APP_MODULE} "VITA_TESTING" USING_VITA_TESTING_MODULE)
+if(USING_VITA_TESTING_MODULE)
+    set(USE_LOCALMAPPING ON)
+endif(USING_VITA_TESTING_MODULE)
 
 #####################################
 #link AlgoBase   #maybe as a subdirectory better ?
@@ -237,6 +243,22 @@ if(USING_FOLLOW_MODULE)
         ${ALGO_BASE_DIR}/utils/AlgoUtils.cpp
     )
     add_definitions("-DAPP_FOLLOW")
+endif()
+
+#####################################
+#compile the app vita_testing
+#####################################
+if(USING_VITA_TESTING_MODULE)
+    include_directories(${PROJECT_SOURCE_DIR}/app_VITA_testing)
+    set(TARGET_FILES
+        ${GENERA_TAGET_FILES}
+        ${PROJECT_SOURCE_DIR}/app_VITA_testing/VITA_testing.cpp
+        ${PROJECT_SOURCE_DIR}/app_VITA_testing/SocketServer.cpp
+        ${PROJECT_SOURCE_DIR}/app_VITA_testing/PID.cpp
+        ${PROJECT_SOURCE_DIR}/app_VITA_testing/DepthPreprocess.cpp
+        ${ALGO_BASE_DIR}/utils/AlgoUtils.cpp
+    )
+    add_definitions("-DAPP_VITA_TESTING")
 endif()
 
 #####################################
